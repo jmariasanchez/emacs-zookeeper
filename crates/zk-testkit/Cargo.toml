@@ -1,0 +1,13 @@
+[package]
+name = "zk-testkit"
+description = "Test harness: launches real ZooKeeper servers and a fault-injecting TCP proxy."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+tokio.workspace = true
+tempfile.workspace = true
+tracing.workspace = true
