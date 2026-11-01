@@ -315,7 +315,7 @@ Inspection is read-only and safe on production clusters.
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `recipe.inspect` | `{cluster, path, kind?: "auto" \| "lock" \| "election" \| "semaphore" \| "queue" \| "discovery" \| "barrier" \| "counter"}` | recipe description |
+| `recipe.inspect` | `{cluster, path}` | recipe description (structure is detected automatically) |
 | `recipe.discovery.services` | `{cluster, base}` | `[names]` |
 | `recipe.discovery.instances` | `{cluster, base, service}` | `[ServiceInstance]` |
 | `recipe.counter.get` | `{cluster, path, encoding?: "i64" \| "i32" \| "text"}` | `{value, version}` |
