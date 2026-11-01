@@ -30,3 +30,7 @@ base64.workspace = true
 
 [dev-dependencies]
 zk-testkit.workspace = true
+
+[[bench]]
+name = "ipc"
+harness = false
