@@ -9,14 +9,14 @@ counts as supported only when CI runs it. The CI matrix in
 
 Measured on 2026-11-01 (macOS aarch64, standalone servers, Java 27):
 
-| Server | zk-core | zk-bridge e2e | zk-cache | Level | Notes |
-| --- | --- | --- | --- | --- | --- |
-| 3.9.7 | pass | pass | pass | Supported | Watch events carry `zxid` |
-| 3.8.8 | pass | pass | pass | Supported | |
-| 3.7.2 | pass | pass | pass | Supported | |
-| 3.6.4 | pass | pass | pass | Supported | `whoami` returns `unimplemented` |
-| 3.5.10 | pass | pass | n/a | Limited | No persistent watches, so no caches and no live browser refresh. No `multiRead`, `getEphemerals` or `getAllChildrenNumber`. Set `server_version` (see below) |
-| 3.4.x | not tested | not tested | n/a | Unsupported | Set `server_version: "3.4.x"` so creates use the old opcode. No containers or TTL |
+| Server | zk-core | zk-bridge e2e | zk-cache | zk-recipes | Level | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3.9.7 | pass | pass | pass | pass | Supported | Watch events carry `zxid` |
+| 3.8.8 | pass | pass | pass | pass | Supported | |
+| 3.7.2 | pass | pass | pass | pass | Supported | |
+| 3.6.4 | pass | pass | pass | pass | Supported | `whoami` returns `unimplemented` |
+| 3.5.10 | pass | pass | n/a | pass | Limited | No persistent watches, so no caches and no live browser refresh. No `multiRead`, `getEphemerals` or `getAllChildrenNumber`. Set `server_version` (see below) |
+| 3.4.x | not tested | not tested | n/a | not tested | Unsupported | Set `server_version: "3.4.x"` so creates use the old opcode. No containers or TTL |
 
 On 3.5 the suites run the version-gated paths and assert the documented
 `unimplemented` errors. Tests that need a newer server log `skipping:

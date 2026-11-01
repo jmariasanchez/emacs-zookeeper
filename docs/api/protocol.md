@@ -323,6 +323,33 @@ Inspection is read-only and safe on production clusters.
 | `recipe.queue.put` | `{cluster, path, data \| text, priority?}` | `{path}` |
 | `recipe.queue.peek` | `{cluster, path}` | item or null |
 | `recipe.queue.take` | `{cluster, path, timeout_ms?}` | item or null |
+| `recipe.queue.len` | `{cluster, path}` | `{len}` |
+
+Queue items have the shape `{node, sequence, data (base64), priority?, ready_at_ms?}`.
+
+`recipe.queue.put` also accepts `ready_at_ms`, which creates a delayed item
+that `take` only returns after that time. Give `priority` or `ready_at_ms`,
+not both.
+
+Counter results are `{value, version}`, where `version` is -1 if the node
+does not exist yet.
+
+`recipe.inspect` returns an object tagged by `kind`:
+
+* `lock {contenders, owner}`
+* `read-write-lock {contenders, readers_holding, writer_holding}`
+* `leader-latch {participants, leader}`
+* `semaphore {leases, lock_contenders}`
+* `queue {size, ready, head}`
+* `locking-queue {size, claimed, head}`
+* `service-registry {services}`
+* `service {name, instances}`
+* `counter {int32, int64, decimal}`
+* `unknown {children}`
+
+All recipe writes follow the cluster safety policy. On read-only profiles
+every one of them fails with `policy-denied`. Recipe writes also accept
+`force`.
 
 Controlled execution of session-bound recipes: the bridge owns the
 participant, and the editor holds a handle.
@@ -330,10 +357,10 @@ participant, and the editor holds a handle.
 | Method | Params | Result |
 | --- | --- | --- |
 | `recipe.lock.acquire` | `{cluster, path, timeout_ms?, data?}` | `{recipe: id, node, ownership}` |
-| `recipe.latch.start` | `{cluster, path, id?}` | `{recipe: id}` |
-| `recipe.member.join` | `{cluster, path, member_id, data?}` | `{recipe: id}` |
+| `recipe.latch.start` | `{cluster, path, id?}` | `{recipe: id, participant}` |
+| `recipe.member.join` | `{cluster, path, member_id, data? \| text?, timeout_ms?}` | `{recipe: id, ownership}` |
 | `recipe.release` | `{recipe}` | `null` |
-| `recipe.list` | `{}` | `[{recipe, kind, cluster, path, ownership}]` |
+| `recipe.list` | `{}` | `[{recipe, kind, cluster, path, ownership, node?, leader?}]` |
 
 Notification **`recipe.ownership`**: `{recipe, state: "held" | "suspended" | "lost" | "released", leader?: bool}`.
 Losing the cluster connection makes every recipe on it `lost`. Editors must

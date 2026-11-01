@@ -117,27 +117,33 @@ expiry always means `Lost`. This follows Curator's documented guidance that
 leadership must be considered lost on SUSPENDED/LOST. `SuspendPolicy::LoseOnSuspend`
 gives the conservative behaviour.
 
-| # | Capability | Curator | Kazoo | Rust client provides | Where | Tests | Status | Target |
+| # | Capability | Curator | Kazoo | Rust client provides | Where | Tests (real server) | Status | Target |
 |---|---|---|---|---|---|---|---|---|
-| E1 | Exclusive lock | `InterProcessMutex` | `Lock` | `Client::lock` (Curator-compatible prefix) | `zk-recipes::locks` | recipes-it | see recipes report | v0.1 |
-| E2 | Reentrant lock | `InterProcessMutex` (reentrant) | `Lock` (not reentrant) | No | `locks::ReentrantMutex` | recipes-it | see recipes report | v0.1 |
-| E3 | Read/write lock | `InterProcessReadWriteLock` | `ReadLock`, `WriteLock` | No | `locks::ReadWriteLock` | recipes-it | see recipes report | v0.1 |
-| E4 | Semaphore | `InterProcessSemaphoreV2` | `Semaphore` | No | `semaphore` | recipes-it | see recipes report | v0.1 |
-| E5 | Leader election | `LeaderSelector` | `Election` | No | `election::LeaderElection` | recipes-it | see recipes report | v0.1 |
-| E6 | Leader latch | `LeaderLatch` | n/a | `LockPrefix::new_curator(.., "latch-")` | `election::LeaderLatch` | recipes-it | see recipes report | v0.1 |
-| E7 | Barrier and double barrier | `DistributedBarrier`, `DistributedDoubleBarrier` | `Barrier`, `DoubleBarrier` | No | `barrier` | recipes-it | see recipes report | v0.1 |
-| E8 | Atomic counter | `DistributedAtomicLong` | `Counter` | No | `counter` | recipes-it | see recipes report | v0.1 |
-| E9 | Shared counter | `SharedCount` | `Counter` | No | `counter` | recipes-it | see recipes report | v0.1 |
-| E10 | Distributed queue | `DistributedQueue` | `Queue` | No | `queue` | recipes-it | see recipes report | v0.1 |
-| E11 | Locking queue | `DistributedQueue` with lockPath | `LockingQueue` | No | `queue::LockingQueue` | recipes-it | see recipes report | v0.1 |
-| E12 | Priority and delayed queues | `DistributedPriorityQueue`, `DistributedDelayQueue` | priority in `Queue.put` | No | `queue` | recipes-it | see recipes report | v0.1 |
-| E13 | Distributed IDs | (sequential nodes) | (sequential nodes) | `CreateSequence` | `id` | recipes-it | see recipes report | v0.1 |
-| E14 | Group membership | `GroupMember` | `Party`, `ShallowParty` | No | `membership` | recipes-it | see recipes report | v0.1 |
-| E15 | Service discovery | `curator-x-discovery` (`ServiceDiscovery`, `ServiceCache`) | n/a | No | `discovery` (Curator JSON wire format) | recipes-it | see recipes report | v0.1 |
-| E16 | Persistent (self-healing) node | `PersistentNode`, `PersistentTtlNode` | n/a | No | `persistent_node` | recipes-it | see recipes report | v0.1 |
-| E17 | Partition and lease coordination | (application level) | n/a | No | `lease` | recipes-it | see recipes report | v1.0 |
-| E18 | Correct cancellation and session-loss handling | Documented in each recipe | Partially | Cancellation-safe `lock` | `ownership` + every recipe | recipes-it (fault proxy) | see recipes report | v0.1 |
-| E19 | Read-only recipe inspection | n/a | n/a | n/a | `inspect`, `recipe.inspect` | recipes-it, ert | see recipes report | v0.1 |
+| E1 | Exclusive lock | `InterProcessMutex` | `Lock` | `Client::lock` (Curator-compatible prefix) | `locks::Mutex`. Uses the Curator node layout `_c_{uuid}-lock-{seq}`, so it interoperates with Curator. A protected create recovers from lost replies, and acquire is cancel-safe | `mutex_mutual_exclusion`, `mutex_timeout_cancellation_and_participants`; faults `mutex_holder_expiry`; bridge-e2e `recipes_end_to_end` | done | v0.1 |
+| E2 | Reentrant lock | `InterProcessMutex` (reentrant) | not reentrant | No | `locks::ReentrantMutex` | `reentrant_mutex` | done. Reentrancy is per instance, not per thread | v0.1 |
+| E3 | Read/write lock | `InterProcessReadWriteLock` | `ReadLock`, `WriteLock` | No | `locks::ReadWriteLock` (`__READ__`/`__WRIT__`) | `read_write_lock` | done | v0.1 |
+| E4 | Semaphore | `InterProcessSemaphoreV2` | `Semaphore` | No | `semaphore` (`locks/` and `leases/` layout) | `semaphore_limits_concurrency`; faults `semaphore_lease_expiry` | done. The lease limit is fixed at construction | v0.1 |
+| E5 | Leader election | `LeaderSelector` | `Election` | No | `election::LeaderElection::run` (requeues automatically) | `leader_election_requeues`; faults `leader_expiry_failover_and_requeue` | done. The closure is not interrupted when leadership is lost: it must watch its `Ownership` | v0.1 |
+| E6 | Leader latch | `LeaderLatch` | n/a | `latch-` prefix | `election::LeaderLatch` | `leader_latch_single_leader_and_failover`; faults; bridge-e2e | done | v0.1 |
+| E7 | Barrier and double barrier | `DistributedBarrier`, `DistributedDoubleBarrier` | `Barrier`, `DoubleBarrier` | No | `barrier` | `barriers` | done | v0.1 |
+| E8 | Atomic counter | `DistributedAtomicLong` | `Counter` | No | `counter::SharedCounter`. CAS with bounded retries. A lost reply surfaces as `OutcomeUnknown` and is never applied twice | `counters_are_atomic`; bridge-e2e | done | v0.1 |
+| E9 | Shared counter | `SharedCount` | `Counter` | No | `counter` (`Int32Be`, `Int64Be` and `Decimal` encodings) | `counters_are_atomic` | done | v0.1 |
+| E10 | Distributed queue | `DistributedQueue` | `Queue` | No | `queue::DistributedQueue`. `take` claims an item with a versioned delete | `queue_fifo_and_exactly_once` (5 concurrent consumers, each item taken exactly once); bridge-e2e | done | v0.1 |
+| E11 | Locking queue | lock path option on `DistributedQueue` | `LockingQueue` | No | `queue::LockingQueue` (ephemeral `taken/` claims) | `locking_queue`; faults `locking_queue_claim_released_on_expiry` | done | v0.1 |
+| E12 | Priority and delayed queues | `DistributedPriorityQueue`, `DistributedDelayQueue` | priority in `put` | No | `queue::PriorityQueue`, `put_delayed` | `delayed_and_priority_queue` | done | v0.1 |
+| E13 | Distributed IDs | sequential nodes | sequential nodes | `CreateSequence` | `id` (sequential and counter-block generators) | `id_generators_unique` | done | v0.1 |
+| E14 | Group membership | `GroupMember` | `Party` | No | `membership::GroupMember` (re-creates its node on a new session) | `group_membership`; faults `persistent_node_member_and_discovery_reregister` | done | v0.1 |
+| E15 | Service discovery | `curator-x-discovery` | n/a | No | `discovery` (Curator JSON wire format, `ServiceDiscovery`, `ServiceCache`) | `service_discovery`; faults (re-registers after expiry) | done. The payload is plain JSON. `ServiceCache` also polls every 0.5 to 1 s to catch data-only changes | v0.1 |
+| E16 | Persistent (self-healing) node | `PersistentNode` | n/a | No | `persistent_node` | faults `persistent_node_member_and_discovery_reregister` | done. Only ephemeral modes are supported, no TTL variant | v0.1 |
+| E17 | Partition and lease coordination | application level | n/a | No | `lease::PartitionAssigner` (rendezvous hashing, exclusive ephemeral claims, epoch) | `partition_assignment_rebalances`; faults `partition_owner_expiry_moves_partitions` | done. Polls to detect membership data changes | v0.1 |
+| E18 | Correct cancellation and session-loss handling | documented per recipe | partial | cancel-safe `lock` | `ownership`, `pinned` (session-bound operations never move to a new session) | every faults test asserts `Lost` after expiry, that another contender takes over, and that two `Held` owners never coexist | done | v0.1 |
+| E19 | Read-only recipe inspection | n/a | n/a | n/a | `inspect`, `recipe.inspect` | `inspect_unknown_and_counter_paths`; bridge-e2e `recipes_end_to_end`, `recipes_respect_read_only` | done | v0.1 |
+
+Run the suites with `cargo test -p zk-recipes`. The tests live in
+`tests/recipes.rs`, which has multi-client tests using independent sessions,
+and `tests/faults.rs`, which uses `FaultProxy` to expire holders. Lock
+revocation (Curator `Revocable`) and child reapers are not implemented. They
+are tracked for v1.0.
 
 ## F. Emacs-native user experience
 
@@ -164,7 +170,7 @@ gives the conservative behaviour.
 | F19 | Read-only and destructive-operation controls | Profile read-only, dry-run preview, typed confirmation for recursive or protected deletes, second confirmation before `force` | ert | done | v0.1 |
 | F20 | Multi-cluster browsing and comparison | One browser per cluster, cross-cluster diff and copy | bridge-e2e | done | v0.1 |
 | F21 | Cache-driven live refresh and freshness display | One `children` cache per expanded browser node, freshness shown in the header with a STALE warning, falling back to watches when the bridge has no caches. `zookeeper-node-follow-mode` never overwrites local edits | ert `zookeeper-test-cache-fallback-to-watch`, `zookeeper-test-browser-freshness`, `zookeeper-test-follow-never-clobbers`; ert-it `zookeeper-integration-caches` | done | v0.1 |
-| F22 | Recipe inspection UI | `zookeeper-recipe.el` | ert | partial (waits on `recipe.*` bridge methods) | v0.1 |
+| F22 | Recipe inspection and controlled participation UI | `zookeeper-recipe.el`, backed by `recipe.*` (inspect, discovery, counters, queues, bridge-owned lock, latch and member, `recipe.ownership` notifications) | bridge-e2e `recipes_end_to_end`; ert | partial: bridge side done, an Emacs real-bridge test for recipes is pending | v0.1 |
 
 ## G. Quality and distribution
 
