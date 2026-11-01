@@ -206,6 +206,7 @@ impl ZkClient {
     /// module docs for the session-level events it emits.
     pub async fn watch_persistent(&self, path: &str, mode: PersistentMode, buffer: usize) -> Result<WatchStream> {
         path::validate(path)?;
+        self.require_server("persistent watches", 3, 6)?;
         let zmode = match mode {
             PersistentMode::Node => zk::AddWatchMode::Persistent,
             PersistentMode::Recursive => zk::AddWatchMode::PersistentRecursive,
@@ -215,7 +216,7 @@ impl ZkClient {
         let watcher = tokio::time::timeout(self.inner.config.operation_timeout(), session.client.watch(path, zmode))
             .await
             .map_err(|_| ZkError::timeout("watch_persistent"))?
-            .map_err(|e| ZkError::from(e).with_path(path))?;
+            .map_err(|e| ZkError::from(e).with_path(path).requires_version("persistent watches", "3.6"))?;
         let (tx, rx) = mpsc::channel(buffer.max(16));
         let cancel = CancellationToken::new();
         let client = self.clone();

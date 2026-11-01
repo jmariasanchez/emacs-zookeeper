@@ -318,6 +318,23 @@ impl ZkClient {
         }
     }
 
+    /// Fails fast with `Unimplemented` when `server_version` is configured and
+    /// older than `major.minor`. Older servers (3.5) drop the connection when
+    /// they receive an unknown opcode, so not sending it at all is kinder.
+    pub(crate) fn require_server(&self, feature: &str, major: u32, minor: u32) -> Result<()> {
+        if let Some(v) = &self.inner.config.server_version {
+            if let Ok((a, b, _)) = crate::config::parse_version(v) {
+                if (a, b) < (major, minor) {
+                    return Err(ZkError::new(
+                        ErrorKind::Unimplemented,
+                        format!("{feature} requires ZooKeeper {major}.{minor} or newer (configured server_version {v})"),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Checks the local safety policy for a write to `path`.
     pub fn check_write_allowed(&self, path: &str) -> Result<()> {
         let safety = &self.inner.config.safety;
@@ -438,29 +455,35 @@ impl ZkClient {
     /// Number of descendants (3.6+, `getAllChildrenNumber`).
     pub async fn count_descendants(&self, path: &str) -> Result<usize> {
         path::validate(path)?;
+        self.require_server("getAllChildrenNumber", 3, 6)?;
         self.run("count_descendants", Some(path), Idempotency::Read, |s| async move {
             s.client.count_descendants_number(path).await
         })
         .await
+        .map_err(|e| e.requires_version("getAllChildrenNumber", "3.6"))
     }
 
     /// Ephemeral nodes of the *current* session under `path` (3.6+).
     pub async fn session_ephemerals(&self, path: &str) -> Result<Vec<String>> {
         path::validate(path)?;
+        self.require_server("getEphemerals", 3, 6)?;
         self.run("get_ephemerals", Some(path), Idempotency::Read, |s| async move {
             s.client.list_ephemerals(path).await
         })
         .await
+        .map_err(|e| e.requires_version("getEphemerals", "3.6"))
     }
 
     /// Identities authenticated on the current session (`whoami`, 3.7+).
     pub async fn whoami(&self) -> Result<Vec<AuthIdentity>> {
+        self.require_server("whoami", 3, 7)?;
         self.run("whoami", None, Idempotency::Read, |s| async move {
             s.client.list_auth_users().await.map(|v| {
                 v.iter().map(|u| AuthIdentity { scheme: u.scheme().into(), user: u.user().into() }).collect()
             })
         })
         .await
+        .map_err(|e| e.requires_version("whoami", "3.7"))
     }
 
     /// Adds authentication to the current session and remembers it so that
@@ -490,6 +513,7 @@ impl ZkClient {
 
     /// Snapshot-consistent multi-read (3.6+).
     pub async fn multi_read(&self, ops: &[ReadOp]) -> Result<Vec<ReadResult>> {
+        self.require_server("multiRead", 3, 6)?;
         for op in ops {
             match op {
                 ReadOp::GetData { path } | ReadOp::GetChildren { path } => path::validate(path)?,
@@ -515,6 +539,7 @@ impl ZkClient {
                 .collect())
         })
         .await
+        .map_err(|e| e.requires_version("multiRead", "3.6"))
     }
 
     // --------------------------------------------------------------- writes

@@ -187,6 +187,13 @@ impl ZkServer {
         &self.version
     }
 
+    /// Whether the server version is at least `major.minor`.
+    pub fn at_least(&self, major: u32, minor: u32) -> bool {
+        let mut it = self.version.split(['.', '-']).map(|p| p.parse::<u32>().unwrap_or(0));
+        let (a, b) = (it.next().unwrap_or(0), it.next().unwrap_or(0));
+        (a, b) >= (major, minor)
+    }
+
     pub fn dir(&self) -> &Path {
         self.dir.path()
     }
@@ -265,6 +272,17 @@ pub fn unique_path(name: &str) -> String {
 /// Whether missing ZooKeeper must fail tests instead of skipping.
 pub fn tests_required() -> bool {
     std::env::var("ZK_TESTS_REQUIRED").map(|v| v == "1" || v == "true").unwrap_or(false)
+}
+
+/// Skips the current test when the shared server is older than `major.minor`.
+#[macro_export]
+macro_rules! require_version {
+    ($server:expr, $major:expr, $minor:expr) => {
+        if !$server.at_least($major, $minor) {
+            eprintln!("skipping: requires ZooKeeper {}.{}+, server is {}", $major, $minor, $server.version());
+            return;
+        }
+    };
 }
 
 /// Returns the shared server or skips the current test.

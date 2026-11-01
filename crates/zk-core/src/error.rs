@@ -204,6 +204,14 @@ impl ZkError {
         self
     }
 
+    /// Annotates `Unimplemented` errors with the server version that introduced the feature.
+    pub fn requires_version(mut self, feature: &str, version: &str) -> Self {
+        if self.kind == ErrorKind::Unimplemented {
+            self.message = format!("{feature} requires ZooKeeper {version} or newer");
+        }
+        self
+    }
+
     pub fn is(&self, kind: ErrorKind) -> bool {
         self.kind == kind
     }

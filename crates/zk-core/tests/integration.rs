@@ -59,7 +59,25 @@ async fn crud_and_stat() {
 
     let e = zk.delete(&root, None).await.unwrap_err();
     assert_eq!(e.kind, ErrorKind::NotEmpty);
-    assert_eq!(zk.count_descendants(&root).await.unwrap(), 2);
+    if server.at_least(3, 6) {
+        assert_eq!(zk.count_descendants(&root).await.unwrap(), 2);
+    } else {
+        let e = zk.count_descendants(&root).await.unwrap_err();
+        assert_eq!(e.kind, ErrorKind::Unimplemented);
+        assert!(e.message.contains("3.6"), "{e}");
+        // 3.5 servers drop the connection on unknown opcodes; wait for recovery.
+        zk.wait_connected(Duration::from_secs(10)).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        zk.wait_connected(Duration::from_secs(10)).await.unwrap();
+        // With server_version configured nothing is sent at all.
+        let mut c = cfg(&server.address());
+        c.server_version = Some(server.version().to_string());
+        let pinned = ZkClient::connect(c).await.unwrap();
+        let e = pinned.count_descendants(&root).await.unwrap_err();
+        assert!(e.message.contains("configured server_version"), "{e}");
+        assert!(pinned.state().is_connected());
+        pinned.close().await;
+    }
 
     let e = zk.delete(&format!("{root}/a"), Some(7)).await.unwrap_err();
     assert_eq!(e.kind, ErrorKind::BadVersion);
@@ -93,9 +111,11 @@ async fn node_types() {
     let err = zk.create(&format!("{root}/eph/child"), b"", &CreateOptions::persistent()).await.unwrap_err();
     assert_eq!(err.kind, ErrorKind::NoChildrenForEphemerals);
     let es = zk.create(&format!("{root}/eseq-"), b"", &CreateOptions::mode(CreateMode::EphemeralSequential)).await.unwrap();
-    let mine = zk.session_ephemerals(&root).await.unwrap();
-    assert!(mine.contains(&format!("{root}/eph")));
-    assert!(mine.contains(&es.path));
+    if server.at_least(3, 6) {
+        let mine = zk.session_ephemerals(&root).await.unwrap();
+        assert!(mine.contains(&format!("{root}/eph")));
+        assert!(mine.contains(&es.path));
+    }
 
     // Containers are removed by the server once their last child goes away
     // (the testkit sets znode.container.checkIntervalMs=500).
@@ -177,7 +197,13 @@ async fn transactions() {
     let res = zk.transaction(&[TxnOp::set_data(&a, b"x", Some(0)), TxnOp::delete(&b, None)]).await.unwrap();
     assert!(matches!(res[0], TxnResult::SetData { stat } if stat.version == 1));
 
-    // multi-read
+    // multi-read (3.6+)
+    if !server.at_least(3, 6) {
+        assert_eq!(zk.multi_read(&[ReadOp::GetData { path: a.clone() }]).await.unwrap_err().kind, ErrorKind::Unimplemented);
+        zk.delete_recursive(&root, &Default::default()).await.unwrap();
+        zk.close().await;
+        return;
+    }
     let rr = zk
         .multi_read(&[ReadOp::GetData { path: a.clone() }, ReadOp::GetChildren { path: root.clone() }, ReadOp::GetData { path: b.clone() }])
         .await
@@ -200,8 +226,12 @@ async fn acl_and_auth() {
     let (got, st) = admin.get_acl(&root).await.unwrap();
     assert_eq!(got, acl);
     assert_eq!(st.aversion, 0);
-    let who = admin.whoami().await.unwrap();
-    assert!(who.iter().any(|w| w.scheme == "digest" && w.user == "alice"));
+    if server.at_least(3, 7) {
+        let who = admin.whoami().await.unwrap();
+        assert!(who.iter().any(|w| w.scheme == "digest" && w.user == "alice"));
+    } else {
+        assert_eq!(admin.whoami().await.unwrap_err().kind, ErrorKind::Unimplemented);
+    }
 
     let anon = connect(&server.address()).await;
     assert_eq!(anon.get_data(&root).await.unwrap().data, b"guarded");
@@ -371,6 +401,12 @@ async fn oneshot_and_persistent_watches() {
     zk.create(&format!("{root}/c"), b"", &CreateOptions::persistent()).await.unwrap();
     assert_eq!(w.changed().await.kind, WatchEventKind::NodeChildrenChanged);
 
+    if !server.at_least(3, 6) {
+        assert_eq!(zk.watch_persistent(&root, PersistentMode::Recursive, 64).await.unwrap_err().kind, ErrorKind::Unimplemented);
+        zk.delete_recursive(&root, &Default::default()).await.unwrap();
+        zk.close().await;
+        return;
+    }
     let mut s = zk.watch_persistent(&root, PersistentMode::Recursive, 64).await.unwrap();
     zk.set_data(&format!("{root}/c"), b"x", None).await.unwrap();
     zk.create(&format!("{root}/c/d"), b"", &CreateOptions::persistent()).await.unwrap();
@@ -403,6 +439,7 @@ fn short_session(addr: &str) -> ClusterConfig {
 #[tokio::test]
 async fn session_expiry_and_reestablishment() {
     let server = require_server!();
+    zk_testkit::require_version!(server, 3, 6);
     let proxy = FaultProxy::start(server.address()).await;
     let zk = ZkClient::connect(short_session(&proxy.address())).await.unwrap();
     let mut events = zk.subscribe_events();

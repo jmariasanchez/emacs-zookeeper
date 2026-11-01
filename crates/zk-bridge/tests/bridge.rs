@@ -209,8 +209,12 @@ async fn node_operations_end_to_end() {
     // Sequential + ephemeral.
     let s = b.ok("node.create", json!({"cluster": c, "path": format!("{root}/seq-"), "mode": "ephemeral-sequential"})).await;
     assert!(s["sequence"].is_number());
-    let eph = b.ok("node.ephemerals", json!({"cluster": c, "path": root})).await;
-    assert_eq!(eph["paths"].as_array().unwrap().len(), 1);
+    if server.at_least(3, 6) {
+        let eph = b.ok("node.ephemerals", json!({"cluster": c, "path": root})).await;
+        assert_eq!(eph["paths"].as_array().unwrap().len(), 1);
+    } else {
+        assert_eq!(b.err_kind("node.ephemerals", json!({"cluster": c, "path": root})).await, "unimplemented");
+    }
 
     // Transaction with failing op index.
     let e = b
@@ -268,6 +272,7 @@ async fn node_operations_end_to_end() {
 #[tokio::test]
 async fn watches_end_to_end() {
     let server = require_server!();
+    zk_testkit::require_version!(server, 3, 6);
     let mut b = Bridge::start().await;
     let c = b.connect(&server.address()).await;
     let root = unique_path("bridge-watch");
@@ -300,6 +305,7 @@ async fn watches_end_to_end() {
 #[tokio::test]
 async fn watch_rate_limit_collapses_overflow() {
     let server = require_server!();
+    zk_testkit::require_version!(server, 3, 6);
     let mut b = Bridge::start_with(&["--watch-rate", "5"], &[]).await;
     let c = b.connect(&server.address()).await;
     let root = unique_path("bridge-rate");
@@ -351,8 +357,10 @@ async fn secrets_never_echoed() {
         .await;
     let status = b.ok("cluster.status", json!({"cluster": c})).await;
     assert!(!status.to_string().contains("TOPSECRET"));
-    let who = b.ok("auth.whoami", json!({"cluster": c})).await;
-    assert!(who.as_array().unwrap().iter().any(|w| w["user"] == "bob"));
+    if server.at_least(3, 7) {
+        let who = b.ok("auth.whoami", json!({"cluster": c})).await;
+        assert!(who.as_array().unwrap().iter().any(|w| w["user"] == "bob"));
+    }
     // Failed auth secrets are not echoed in errors either.
     let e = b.call("auth.add", json!({"cluster": c, "scheme": "digest", "credential": {"env": "ZK_NOT_SET_TOPSECRET_VAR"}})).await.unwrap_err();
     assert_eq!(e["data"]["kind"], "config");
