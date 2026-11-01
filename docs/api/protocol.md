@@ -29,6 +29,25 @@ Requests that touch the same cluster are sent to ZooKeeper in arrival order
 (the underlying client preserves request order per session), so a `node.set`
 followed by a `node.get` on the same cluster observes the write.
 
+### Version-dependent features
+
+Some operations need newer servers:
+
+| Operation | Minimum server version |
+| --- | --- |
+| `node.count` (`getAllChildrenNumber`) | 3.6 |
+| `node.ephemerals` | 3.6 |
+| `node.multi-read` | 3.6 |
+| Persistent and recursive watches, including caches | 3.6 |
+| `auth.whoami` | 3.7 |
+| Watch event `zxid` | 3.9 |
+
+On older servers these return `unimplemented`.
+
+If `server_version` is set in the cluster config, the bridge refuses the call
+locally and never sends it. This matters because 3.5 servers drop the
+connection when they receive an unknown opcode.
+
 ### Error codes
 
 | Code | Meaning |
@@ -171,9 +190,9 @@ produces an `audit.record` notification.
 
 | Method | Extra params | Result |
 | --- | --- | --- |
-| `node.get` | `sync?`, `max_bytes?`, `max_text_bytes?` | `{path, stat, data, utf8, text?, truncated}` |
+| `node.get` | `sync?`, `max_bytes?`, `max_text_bytes?` | `{path, stat, data, utf8, text?, truncated, size, ephemeral_owner_hex?}` |
 | `node.exists` | | `{path, stat \| null}` |
-| `node.children` | `stats?: bool`, `limit?`, `offset?` | `{path, stat, total, children: [{name, path, stat?}], truncated}` |
+| `node.children` | `stats?: bool`, `limit?`, `offset?` | `{path, stat, total, offset, children: [{name, path, stat?}], truncated}` |
 | `node.create` | `data \| text`, `mode?`, `acl?`, `ttl_ms?`, `create_parents?` | `{path, stat, sequence?}` |
 | `node.set` | `data \| text`, `version?` | `{path, stat}` |
 | `node.delete` | `version?`, `recursive?`, `dry_run?`, `limit?` | `{paths, dry_run, rescans, blocked?}` |
@@ -231,7 +250,7 @@ data?: true, acl?: false, stat?: false, max_nodes?: 100000}`. Differences:
 The result is `{watch: id, stat?, children?}` (the current value at
 registration).
 
-One-shot watches fire once, then emit `watch.removed`. Persistent watches stay
+One-shot watches fire once, then emit `watch.removed {watch}`. Persistent watches stay
 until removed and survive reconnects and session expiry.
 
 Notification **`watch.event`**: `{watch, cluster, event: {kind, path, zxid, at_ms, message?}}`.
@@ -254,15 +273,41 @@ The result is `{cache: id, status}` once the initial load completes.
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `cache.get` | `{cache, path?}` | cached node `{path, stat, data?, fetched_at_ms}` or null |
+| `cache.get` | `{cache, path?, with_data?: true}` | cached node `{path, stat, has_data, data?, text?, fetched_at_ms}` or null |
 | `cache.children` | `{cache, path}` | `[names]` |
 | `cache.snapshot` | `{cache, with_data?: false}` | `{nodes: [...], status}` |
 | `cache.status` | `{cache}` | `CacheStatus` |
 | `cache.stop` | `{cache}` | `null` |
 
-Notification **`cache.event`**: `{cache, event}`. `event` is a tagged
-`CacheEvent`: `node-added`, `node-updated`, `node-removed`, `initialized`,
-`resyncing`, `resynced`, `stale`, `error`, `closed`.
+`cache.list {}` returns `[{cache, cluster, kind, path, status}]`.
+
+`CacheOptions`: `{cache_data: true, max_nodes: 100000, max_bytes: 67108864,
+max_depth?: n, max_data_per_node: 1048576, include_system: false}`.
+
+`CacheStatus`: `{state, generation, last_sync_ms, nodes, bytes, evictions, truncated}`,
+where `state` is one of:
+
+* `initializing`
+* `live`: connected, the watch is registered, and the contents were rebuilt
+  after the last gap.
+* `suspended`: the connection is lost, so the contents may be stale.
+* `resyncing`
+* `stale`: a rebuild failed and is being retried.
+* `closed`
+
+Notification **`cache.event`**: `{cache, event}`. `event` is tagged by `type`:
+
+* `node-added {path, stat}`
+* `node-updated {path, stat, old_stat}`
+* `node-removed {path}`
+* `initialized {nodes}`
+* `resyncing {reason}`
+* `resynced {changed}`
+* `stale {reason}`
+* `error {error}`
+* `closed`
+* `overflow {dropped}`: notifications were dropped, so the client must
+  re-snapshot.
 
 ## Recipes
 
@@ -297,7 +342,8 @@ never assume ownership from a stale handle.
 ## Audit
 
 Every mutating request produces **`audit.record`**:
-`{at_ms, cluster, operation, paths, outcome, error?, forced?}`.
+`{at_ms, cluster, cluster_id, operation, paths, outcome, error?, forced?}`.
+Here `cluster` is the profile name and `cluster_id` is the bridge handle.
 `audit.list {limit?: 200}` returns the in-memory ring buffer (last 1000
 records). The bridge also appends records as JSON lines to `$ZK_BRIDGE_AUDIT_LOG`
 when that variable is set.
