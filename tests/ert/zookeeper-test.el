@@ -288,5 +288,57 @@
         (should sent)
         (should (= 0 (hash-table-count (zookeeper-bridge-pending zookeeper-bridge--current))))))))
 
+(ert-deftest zookeeper-test-cache-fallback-to-watch ()
+  (zookeeper-test--with-fake
+    (let ((zookeeper-browser--cache-unsupported nil)
+          (zookeeper-browser-live-refresh t))
+      (with-current-buffer (zookeeper-browse "fake")
+        (unwind-protect
+            (progn
+              (should (zookeeper-it-wait-for
+                       (lambda () (equal (gethash "/" zookeeper-browser--watches) "w1"))))
+              (should zookeeper-browser--cache-unsupported)
+              (should (equal (zookeeper-browser--header-line) " live refresh: watches")))
+          (kill-buffer))))))
+
+(defun zookeeper-it-wait-for (pred &optional secs)
+  "Wait up to SECS for PRED."
+  (let ((deadline (+ (float-time) (or secs 5))))
+    (while (and (not (funcall pred)) (< (float-time) deadline))
+      (accept-process-output nil 0.05))
+    (funcall pred)))
+
+(ert-deftest zookeeper-test-browser-freshness ()
+  (with-temp-buffer
+    (setq zookeeper-browser--cache-states (make-hash-table :test 'equal))
+    (should-not (zookeeper-browser-freshness))
+    (puthash "k1" "live" zookeeper-browser--cache-states)
+    (should (equal (zookeeper-browser-freshness) "live"))
+    (should-not (string-match-p "STALE" (zookeeper-browser--header-line)))
+    (puthash "k2" "stale" zookeeper-browser--cache-states)
+    (should (equal (zookeeper-browser-freshness) "stale"))
+    (should (string-match-p "STALE" (zookeeper-browser--header-line)))))
+
+(ert-deftest zookeeper-test-follow-never-clobbers ()
+  (zookeeper-test--with-fake
+    (zookeeper-call "fake" "node.create" :path "/f" :text "one")
+    (with-current-buffer (zookeeper-node-open "fake" "/f")
+      (unwind-protect
+          (progn
+            ;; Simulate follow mode without a real cache.
+            (setq zookeeper-node-follow-mode t zookeeper-node--cache "k9")
+            (zookeeper-call "fake" "node.set" :path "/f" :data (zookeeper-data-encode "two"))
+            (zookeeper-node--on-cache-event '(:cache "k9" :event (:type "node-updated" :path "/f")))
+            (should (string-match-p "two" (buffer-string)))
+            (goto-char (point-max)) (insert "LOCAL")
+            (zookeeper-call "fake" "node.set" :path "/f" :data (zookeeper-data-encode "three"))
+            (zookeeper-node--on-cache-event '(:cache "k9" :event (:type "node-updated" :path "/f")))
+            (should (string-match-p "twoLOCAL" (buffer-string)))
+            (should zookeeper-node--server-changed)
+            (should (string-match-p "C-c C-r" (zookeeper-node--follow-header))))
+        (setq zookeeper-node--cache nil)
+        (set-buffer-modified-p nil)
+        (kill-buffer)))))
+
 (provide 'zookeeper-test)
 ;;; zookeeper-test.el ends here

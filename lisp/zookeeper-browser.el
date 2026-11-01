@@ -251,8 +251,130 @@ When APPEND is non-nil fetch the next page.  CALLBACK is run after."
                         :stat (plist-get res :stat))
              zookeeper-browser--children)))
 
+;;;; Live refresh: children caches, falling back to persistent watches
+
+(defvar zookeeper-browser--cache-unsupported nil
+  "Non-nil when the bridge does not implement cache.* methods.")
+
+(defvar-local zookeeper-browser--caches nil
+  "Hash: path -> cache id (or `pending').")
+(defvar-local zookeeper-browser--cache-states nil
+  "Hash: cache id -> freshness state string.")
+
+(defconst zookeeper-browser--state-rank
+  '(("live" . 0) ("initializing" . 1) ("resyncing" . 2) ("suspended" . 3)
+    ("stale" . 4) ("closed" . 5))
+  "Severity of cache states, higher is worse.")
+
+(defun zookeeper-browser-freshness ()
+  "Return the worst cache state of this browser, or nil when no caches."
+  (let (worst)
+    (when zookeeper-browser--cache-states
+      (maphash (lambda (_ s)
+                 (when (> (alist-get s zookeeper-browser--state-rank 5 nil #'equal)
+                          (alist-get worst zookeeper-browser--state-rank -1 nil #'equal))
+                   (setq worst s)))
+               zookeeper-browser--cache-states))
+    worst))
+
+(defun zookeeper-browser--header-line ()
+  "Header line showing live-refresh freshness."
+  (let ((s (zookeeper-browser-freshness)))
+    (cond
+     (s (concat " cache: "
+                (propertize s 'face (pcase s
+                                      ("live" 'zookeeper-connected)
+                                      ((or "initializing" "resyncing" "suspended")
+                                       'zookeeper-suspended)
+                                      (_ 'zookeeper-stale)))
+                (if (equal s "live") ""
+                  (propertize "  [STALE: tree may be outdated]" 'face 'zookeeper-stale))))
+     ((and zookeeper-browser--watches (> (hash-table-count zookeeper-browser--watches) 0))
+      " live refresh: watches")
+     (t nil))))
+
+(defun zookeeper-browser--set-cache-state (cache state)
+  "Record STATE for CACHE and update the header line."
+  (puthash cache state zookeeper-browser--cache-states)
+  (force-mode-line-update))
+
 (defun zookeeper-browser--watch (path)
-  "Install a live-refresh watch on PATH."
+  "Keep PATH fresh with a children cache, or a persistent watch as fallback."
+  (unless zookeeper-browser--caches
+    (setq zookeeper-browser--caches (make-hash-table :test 'equal)
+          zookeeper-browser--cache-states (make-hash-table :test 'equal)))
+  (cond
+   ((not zookeeper-browser-live-refresh) nil)
+   ((gethash path zookeeper-browser--caches) nil)
+   (zookeeper-browser--cache-unsupported (zookeeper-browser--watch-fallback path))
+   (t
+    (let ((buf (current-buffer)))
+      (puthash path 'pending zookeeper-browser--caches)
+      (zookeeper-call-async
+       zookeeper-cluster "cache.start" (list :path path :kind "children")
+       (lambda (res)
+         (when (buffer-live-p buf)
+           (with-current-buffer buf
+             (let ((id (plist-get res :cache)))
+               (if (gethash path zookeeper-browser--expanded)
+                   (progn
+                     (puthash path id zookeeper-browser--caches)
+                     (zookeeper-browser--set-cache-state
+                      id (or (plist-get (plist-get res :status) :state) "live")))
+                 (remhash path zookeeper-browser--caches)
+                 (zookeeper-rpc-async "cache.stop" (list :cache id) #'ignore #'ignore))))))
+       (lambda (err)
+         (when (buffer-live-p buf)
+           (with-current-buffer buf
+             (remhash path zookeeper-browser--caches)
+             (when (equal (plist-get err :kind) "method-not-found")
+               (setq zookeeper-browser--cache-unsupported t))
+             (zookeeper-browser--watch-fallback path)))))))))
+
+(defun zookeeper-browser--uncache (path)
+  "Stop the cache or watch keeping PATH fresh."
+  (when zookeeper-browser--caches
+    (let ((c (gethash path zookeeper-browser--caches)))
+      (remhash path zookeeper-browser--caches)
+      (when (stringp c)
+        (remhash c zookeeper-browser--cache-states)
+        (when (zookeeper-bridge-live-p)
+          (zookeeper-rpc-async "cache.stop" (list :cache c) #'ignore #'ignore)))))
+  (zookeeper-browser--unwatch path))
+
+(defun zookeeper-browser--on-cache-event (params)
+  "Refresh browsers affected by cache event PARAMS."
+  (let* ((cache (plist-get params :cache))
+         (event (plist-get params :event))
+         (type (plist-get event :type)))
+    (dolist (buf (buffer-list))
+      (with-current-buffer buf
+        (when (and (derived-mode-p 'zookeeper-browser-mode) zookeeper-browser--caches)
+          (let (hit)
+            (maphash (lambda (p c) (when (equal c cache) (setq hit p)))
+                     zookeeper-browser--caches)
+            (when hit
+              (pcase type
+                ((or "initialized" "resynced")
+                 (zookeeper-browser--set-cache-state cache "live")
+                 (zookeeper-browser--fetch hit))
+                ("resyncing" (zookeeper-browser--set-cache-state cache "resyncing"))
+                ("stale" (zookeeper-browser--set-cache-state cache "stale"))
+                ("error" (zookeeper-browser--set-cache-state cache "stale"))
+                ("closed" (zookeeper-browser--set-cache-state cache "closed"))
+                ((or "node-added" "node-removed" "node-updated" "overflow")
+                 (if (and (equal type "node-removed")
+                          (equal (plist-get event :path) hit))
+                     (let ((parent (zookeeper-path-parent hit)))
+                       (when (gethash parent zookeeper-browser--expanded)
+                         (zookeeper-browser--fetch parent)))
+                   (when (gethash hit zookeeper-browser--expanded)
+                     (zookeeper-browser--fetch hit))))))))))))
+
+(add-hook 'zookeeper-cache-event-functions #'zookeeper-browser--on-cache-event)
+
+(defun zookeeper-browser--watch-fallback (path)
+  "Install a live-refresh persistent watch on PATH."
   (when (and zookeeper-browser-live-refresh
              (not (gethash path zookeeper-browser--watches)))
     (let ((buf (current-buffer)))
@@ -348,10 +470,14 @@ When APPEND is non-nil fetch the next page.  CALLBACK is run after."
   (setq-local bookmark-make-record-function #'zookeeper-browser-bookmark-make-record)
   (add-hook 'kill-buffer-hook #'zookeeper-browser--cleanup nil t)
   (zookeeper-setup-mode-line)
+  (setq header-line-format '(:eval (zookeeper-browser--header-line)))
   (unless zookeeper-browser--expanded (zookeeper-browser--init-state)))
 
 (defun zookeeper-browser--cleanup ()
-  "Remove watches owned by this browser buffer."
+  "Remove caches and watches owned by this browser buffer."
+  (when zookeeper-browser--caches
+    (dolist (p (hash-table-keys zookeeper-browser--caches))
+      (ignore-errors (zookeeper-browser--uncache p))))
   (when zookeeper-browser--watches
     (dolist (p (hash-table-keys zookeeper-browser--watches))
       (ignore-errors (zookeeper-browser--unwatch p)))))
@@ -389,7 +515,7 @@ When APPEND is non-nil fetch the next page.  CALLBACK is run after."
 (defun zookeeper-browser--collapse (path)
   "Collapse PATH."
   (remhash path zookeeper-browser--expanded)
-  (zookeeper-browser--unwatch path)
+  (zookeeper-browser--uncache path)
   (zookeeper-browser-render))
 
 (defun zookeeper-browser-toggle ()

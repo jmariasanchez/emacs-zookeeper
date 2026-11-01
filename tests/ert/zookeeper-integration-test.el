@@ -95,5 +95,71 @@
                          (zookeeper-call "it" "node.delete" :path root :recursive t)))
         (zookeeper-bridge-stop)))))
 
+(ert-deftest zookeeper-integration-caches ()
+  (let ((bridge (getenv "ZK_BRIDGE")) (connect (getenv "ZK_CONNECT")))
+    (unless (and bridge connect (file-executable-p bridge))
+      (ert-skip "ZK_BRIDGE and ZK_CONNECT not set"))
+    (let* ((zookeeper-bridge-executable bridge)
+           (zookeeper-bridge-auto-restart nil)
+           (zookeeper-clusters `(("itc" :connect ,connect)))
+           (zookeeper--connections (make-hash-table :test 'equal))
+           (zookeeper-bridge--current nil)
+           (zookeeper-browser--cache-unsupported nil)
+           (zookeeper-browser-live-refresh t)
+           (root (format "/zkel-cache-%d" (random 1000000)))
+           (cache-events nil)
+           (zookeeper-cache-event-functions
+            (cons (lambda (p) (push p cache-events)) zookeeper-cache-event-functions)))
+      (unwind-protect
+          (progn
+            (zookeeper-connect "itc")
+            (zookeeper-call "itc" "node.create" :path root :text "v1")
+            ;; Raw cache API.
+            (let* ((res (zookeeper-call "itc" "cache.start" :path root :kind "children"))
+                   (id (plist-get res :cache)))
+              (should (stringp id))
+              (should (plist-get (plist-get res :status) :state))
+              (zookeeper-call "itc" "node.create" :path (concat root "/k1") :text "x")
+              (should (zookeeper-it--wait
+                       (lambda () (member "k1" (zookeeper-rpc "cache.children"
+                                                              (list :cache id :path root))))))
+              (should (cl-some (lambda (p) (and (equal (plist-get p :cache) id)
+                                                (equal (plist-get (plist-get p :event) :type)
+                                                       "node-added")))
+                               cache-events))
+              (zookeeper-rpc "cache.stop" (list :cache id)))
+            ;; Browser live refresh via children cache.
+            (with-current-buffer (zookeeper-browse "itc" root)
+              (unwind-protect
+                  (progn
+                    (zookeeper-browser--expand root t)
+                    (should (zookeeper-it--wait
+                             (lambda () (stringp (gethash root zookeeper-browser--caches)))))
+                    (should-not zookeeper-browser--cache-unsupported)
+                    (should (string-match-p "cache: " (zookeeper-browser--header-line)))
+                    (zookeeper-call "itc" "node.create" :path (concat root "/k2") :text "y")
+                    (should (zookeeper-it--wait
+                             (lambda () (string-match-p "k2" (buffer-string))))))
+                (kill-buffer)))
+            ;; Node follow mode.
+            (with-current-buffer (zookeeper-node-open "itc" root)
+              (unwind-protect
+                  (progn
+                    (zookeeper-node-follow-mode 1)
+                    (should zookeeper-node--cache)
+                    (zookeeper-call "itc" "node.set" :path root :text "v2")
+                    (should (zookeeper-it--wait
+                             (lambda () (string-match-p "v2" (buffer-string)))))
+                    (goto-char (point-max)) (insert "LOCAL")
+                    (zookeeper-call "itc" "node.set" :path root :text "v3")
+                    (should (zookeeper-it--wait (lambda () zookeeper-node--server-changed)))
+                    (should (string-match-p "v2LOCAL" (buffer-string)))
+                    (zookeeper-node-follow-mode -1))
+                (set-buffer-modified-p nil)
+                (kill-buffer)))
+            (zookeeper-call "itc" "node.delete" :path root :recursive t))
+        (ignore-errors (zookeeper-call "itc" "node.delete" :path root :recursive t))
+        (zookeeper-bridge-stop)))))
+
 (provide 'zookeeper-integration-test)
 ;;; zookeeper-integration-test.el ends here

@@ -336,5 +336,85 @@ With FORCE-VERSION, use that version instead."
   (kill-new zookeeper-node-path)
   (message "%s" zookeeper-node-path))
 
+;;;; Follow mode
+
+(defvar-local zookeeper-node--cache nil "Node cache id used by follow mode.")
+(defvar-local zookeeper-node--server-changed nil
+  "Non-nil when the server changed while local edits were pending.")
+(defvar-local zookeeper-node--cache-state nil "Freshness of the follow cache.")
+
+(defun zookeeper-node--follow-header ()
+  "Header line for `zookeeper-node-follow-mode'."
+  (concat
+   " follow: "
+   (propertize (or zookeeper-node--cache-state "starting")
+               'face (if (equal zookeeper-node--cache-state "live")
+                         'zookeeper-connected 'zookeeper-stale))
+   (if zookeeper-node--server-changed
+       (propertize "  server changed, C-c C-r to reload" 'face 'zookeeper-warning-banner)
+     "")))
+
+(define-minor-mode zookeeper-node-follow-mode
+  "Keep this node buffer updated from a bridge node cache.
+Unsaved local edits are never overwritten; a notice is shown instead."
+  :lighter " Follow"
+  (if zookeeper-node-follow-mode
+      (condition-case err
+          (let ((res (zookeeper-call zookeeper-cluster "cache.start"
+                                     :path zookeeper-node-path :kind "node")))
+            (setq zookeeper-node--cache (plist-get res :cache)
+                  zookeeper-node--cache-state (plist-get (plist-get res :status) :state)
+                  zookeeper-node--server-changed nil)
+            (setq-local header-line-format '(:eval (zookeeper-node--follow-header)))
+            (add-hook 'kill-buffer-hook #'zookeeper-node--stop-follow nil t))
+        (zookeeper-error
+         (setq zookeeper-node-follow-mode nil)
+         (if (equal (zookeeper-error-kind err) "method-not-found")
+             (message "Caches are not supported by this bridge")
+           (signal (car err) (cdr err)))))
+    (zookeeper-node--stop-follow)
+    (kill-local-variable 'header-line-format)))
+
+(defun zookeeper-node--stop-follow ()
+  "Stop the follow cache."
+  (when (and zookeeper-node--cache (zookeeper-bridge-live-p))
+    (zookeeper-rpc-async "cache.stop" (list :cache zookeeper-node--cache) #'ignore #'ignore))
+  (setq zookeeper-node--cache nil))
+
+(defun zookeeper-node--on-cache-event (params)
+  "Update following node buffers from cache event PARAMS."
+  (let* ((cache (plist-get params :cache))
+         (event (plist-get params :event))
+         (type (plist-get event :type)))
+    (dolist (buf (buffer-list))
+      (with-current-buffer buf
+        (when (and zookeeper-node-follow-mode (equal zookeeper-node--cache cache))
+          (pcase type
+            ((or "node-updated" "node-added" "resynced" "overflow" "initialized")
+             (setq zookeeper-node--cache-state "live")
+             (if (buffer-modified-p)
+                 (setq zookeeper-node--server-changed t)
+               (let ((pos (point)) (view zookeeper-node--view))
+                 (zookeeper-node-revert t)
+                 (unless (eq view zookeeper-node--view) (zookeeper-node-set-view view))
+                 (goto-char (min pos (point-max))))))
+            ("node-removed"
+             (setq zookeeper-node--server-changed t)
+             (message "%s was deleted on the server" zookeeper-node-path))
+            ((or "resyncing" "stale" "error" "closed")
+             (setq zookeeper-node--cache-state (if (equal type "error") "stale" type))))
+          (force-mode-line-update))))))
+
+(add-hook 'zookeeper-cache-event-functions #'zookeeper-node--on-cache-event)
+
+(defun zookeeper-node-reload ()
+  "Reload from the server, asking before discarding edits."
+  (interactive)
+  (zookeeper-node-revert)
+  (setq zookeeper-node--server-changed nil))
+
+(define-key zookeeper-node-mode-map (kbd "C-c C-r") #'zookeeper-node-reload)
+(define-key zookeeper-node-mode-map (kbd "C-c C-f") #'zookeeper-node-follow-mode)
+
 (provide 'zookeeper-node)
 ;;; zookeeper-node.el ends here
