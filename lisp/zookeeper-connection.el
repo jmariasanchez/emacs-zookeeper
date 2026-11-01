@@ -217,6 +217,16 @@ Secrets are resolved only when RESOLVE is non-nil.  Never log the result."
   "Return the state string of cluster NAME, or nil if not connected."
   (plist-get (zookeeper-connection name) :state))
 
+(defun zookeeper--state-string (state)
+  "Return STATE as a string; it may be a string or a plist with :state."
+  (cond ((stringp state) state)
+        ((and (listp state) (plist-get state :state)) (plist-get state :state))
+        (t nil)))
+
+(defun zookeeper--state-session (state)
+  "Return a session id from STATE plist, if any."
+  (and (listp state) (plist-get state :session_id)))
+
 (defun zookeeper-connected-p (name)
   "Return non-nil if cluster NAME has a live bridge handle."
   (and (zookeeper-bridge-live-p)
@@ -233,7 +243,10 @@ Secrets are resolved only when RESOLVE is non-nil.  Never log the result."
                   (zookeeper-rpc "cluster.connect" (list :config config :wait t) 60)))
            (id (plist-get res :cluster)))
       (setq config nil)
-      (puthash name (list :id id :state (or (plist-get res :state) "connected")
+      (puthash name (list :id id
+                          :state (or (zookeeper--state-string (plist-get res :state))
+                                     "connected")
+                          :session (zookeeper--state-session (plist-get res :state))
                           :connected-at (current-time))
                zookeeper--connections)
       (run-hooks 'zookeeper-connection-state-change-hook)
@@ -272,7 +285,8 @@ ON-SUCCESS and ON-ERROR as in `zookeeper-rpc-async'."
   "Update state from `connection.event' PARAMS."
   (let* ((id (plist-get params :cluster))
          (event (plist-get params :event))
-         (state (or (plist-get params :state) (plist-get event :kind))))
+         (state (or (zookeeper--state-string (plist-get params :state))
+                    (plist-get event :kind))))
     (if (null id)
         ;; Bridge exited: every connection is gone.
         (clrhash zookeeper--connections)
