@@ -161,5 +161,69 @@
         (ignore-errors (zookeeper-call "itc" "node.delete" :path root :recursive t))
         (zookeeper-bridge-stop)))))
 
+(ert-deftest zookeeper-integration-recipes ()
+  (let ((bridge (getenv "ZK_BRIDGE")) (connect (getenv "ZK_CONNECT")))
+    (unless (and bridge connect (file-executable-p bridge))
+      (ert-skip "ZK_BRIDGE and ZK_CONNECT not set"))
+    (let* ((zookeeper-bridge-executable bridge)
+           (zookeeper-bridge-auto-restart nil)
+           (zookeeper-clusters `(("itr" :connect ,connect)
+                                 ("itr-ro" :connect ,connect :read-only t)))
+           (zookeeper--connections (make-hash-table :test 'equal))
+           (zookeeper-bridge--current nil)
+           (zookeeper-recipe--handles (make-hash-table :test 'equal))
+           (zookeeper-recipe-confirm-function #'ignore)
+           (root (format "/zkel-recipe-%d" (random 1000000)))
+           (owner-events nil)
+           (zookeeper-recipe-ownership-functions
+            (cons (lambda (p) (push p owner-events)) zookeeper-recipe-ownership-functions)))
+      (unwind-protect
+          (let ((c (zookeeper-connect "itr")))
+            ;; Queue: put then inspect.
+            (zookeeper-rpc "recipe.queue.put" (list :cluster c :path (concat root "/q") :text "a"))
+            (let ((q (zookeeper-recipe-inspect "itr" (concat root "/q"))))
+              (should (equal (plist-get q :kind) "queue"))
+              (should (= 1 (plist-get q :size)))
+              (should (string-match-p "Size: 1"
+                                      (with-current-buffer (format "*zk recipe itr:%s/q*" root)
+                                        (buffer-string)))))
+            ;; Lock: acquire -> held -> inspect -> release -> released.
+            (let* ((lp (concat root "/lock"))
+                   (r (zookeeper-lock-acquire "itr" lp 5000)))
+              (should (equal (zookeeper-recipe-state r) "held"))
+              (let ((ins (zookeeper-recipe-inspect "itr" lp)))
+                (should (equal (plist-get ins :kind) "lock"))
+                (should (plist-get ins :owner))
+                (should (= 1 (length (plist-get ins :contenders)))))
+              (should (cl-some (lambda (x) (equal (plist-get x :recipe) r))
+                               (zookeeper-recipe-sync)))
+              (zookeeper-recipe-release r)
+              (should (zookeeper-it--wait
+                       (lambda () (cl-some (lambda (p) (and (equal (plist-get p :recipe) r)
+                                                            (equal (plist-get p :state) "released")))
+                                           owner-events))))
+              (should (equal (zookeeper-recipe-state r) "released"))
+              (should-not (plist-get (zookeeper-recipe-inspect "itr" lp) :owner)))
+            ;; Counter.
+            (let ((cp (concat root "/ctr")))
+              (should (= -1 (plist-get (zookeeper-counter-view "itr" cp) :version)))
+              (should (= 5 (plist-get (zookeeper-counter-add "itr" cp 5) :value)))
+              (should (= 3 (plist-get (zookeeper-counter-add "itr" cp -2) :value)))
+              (should (= 3 (plist-get (zookeeper-counter-view "itr" cp) :value))))
+            ;; Discovery on an empty base.
+            (should (null (zookeeper-discovery-browse "itr" (concat root "/services"))))
+            ;; Read-only profile: recipe writes are refused.
+            (zookeeper-connect "itr-ro")
+            (should-error (zookeeper-lock-acquire "itr-ro" (concat root "/l2") 1000)
+                          :type 'user-error)
+            (let ((err (should-error
+                        (zookeeper-rpc "recipe.counter.add"
+                                       (list :cluster (zookeeper-cluster-id "itr-ro")
+                                             :path (concat root "/ctr") :delta 1))
+                        :type 'zookeeper-error)))
+              (should (equal (zookeeper-error-kind err) "policy-denied"))))
+        (ignore-errors (zookeeper-call "itr" "node.delete" :path root :recursive t))
+        (zookeeper-bridge-stop)))))
+
 (provide 'zookeeper-integration-test)
 ;;; zookeeper-integration-test.el ends here

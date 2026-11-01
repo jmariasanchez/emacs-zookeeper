@@ -340,5 +340,41 @@
         (set-buffer-modified-p nil)
         (kill-buffer)))))
 
+(ert-deftest zookeeper-test-recipe-render ()
+  (let ((lock (zookeeper-recipe-render
+               '(:kind "lock" :path "/l" :owner "n-0000000001"
+                 :contenders ((:node "n-0000000002" :sequence 2)
+                              (:node "n-0000000001" :sequence 1 :is_owner t :session_id "0x1"))))))
+    (should (string-match-p "Owner: n-0000000001" lock))
+    (should (string-match-p "Contenders (2)" lock))
+    (should (< (string-match "#1" lock) (string-match "#2" lock)))
+    (should (string-match-p "★ #1 +n-0000000001  session 0x1  OWNER" lock)))
+  (should (string-match-p "Size: 3   Ready: 2"
+                          (zookeeper-recipe-render
+                           '(:kind "queue" :path "/q" :size 3 :ready 2
+                             :head ((:node "qn-0000000000" :sequence 0))))))
+  (should (string-match-p "int64: +5"
+                          (zookeeper-recipe-render '(:kind "counter" :path "/c" :int64 5))))
+  (should (string-match-p "Leader: none"
+                          (zookeeper-recipe-render '(:kind "leader-latch" :path "/x"))))
+  (should (string-match-p "svc  (1 instance)\n +i1  10.0.0.1:80"
+                          (zookeeper-recipe-render
+                           '(:kind "service-registry" :path "/s"
+                             :services ((:name "svc" :instances ((:id "i1" :address "10.0.0.1" :port 80))))))))
+  (should (string-match-p "No known recipe"
+                          (zookeeper-recipe-render '(:kind "unknown" :path "/u" :children 0)))))
+
+(ert-deftest zookeeper-test-recipe-ownership-warning ()
+  (let ((zookeeper-recipe--handles (make-hash-table :test 'equal)))
+    (zookeeper-recipe--register '(:recipe "r1" :node "/l/n" :ownership "held") "lock" "c" "/l")
+    (should-not (zookeeper-recipes--warning))
+    (zookeeper-recipe--on-ownership '(:recipe "r1" :state "lost"))
+    (should (equal (zookeeper-recipe-state "r1") "lost"))
+    (should (string-match-p "NOT HELD: r1 lost" (zookeeper-recipes--warning)))
+    (zookeeper-recipe--on-ownership '(:recipe "r1" :state "released"))
+    (should-not (zookeeper-recipes--warning))
+    (zookeeper-recipes-forget-released)
+    (should (= 0 (hash-table-count zookeeper-recipe--handles)))))
+
 (provide 'zookeeper-test)
 ;;; zookeeper-test.el ends here
