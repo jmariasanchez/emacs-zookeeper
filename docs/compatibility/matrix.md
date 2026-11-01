@@ -74,4 +74,4 @@ server refuses DIGEST-MD5. Servers that use DIGEST-MD5 SASL need
 The minimum Emacs version is 29.1, because the package needs native JSON and
 `transient`. CI runs the ERT suite on 29.4 and 30.1.
 
-The minimum Rust version is 1.80.
+Cargo metadata declares Rust 1.80, but that minimum has not been validated against the locked dependency graph. Local verification used Rust 1.97.1. Use current stable Rust until an MSRV CI job establishes a supported minimum.

@@ -25,9 +25,9 @@ Responses: `{"jsonrpc":"2.0","id":...,"result":...}` or
 Notifications (server to client) have no `id`.
 
 Requests are processed **concurrently**; responses may arrive in any order.
-Requests that touch the same cluster are sent to ZooKeeper in arrival order
-(the underlying client preserves request order per session), so a `node.set`
-followed by a `node.get` on the same cluster observes the write.
+Arrival order does not establish an ordering between concurrent requests.
+Await a successful `node.set` response before issuing a dependent `node.get`.
+The underlying client preserves the order in which operations reach its session.
 
 ### Version-dependent features
 

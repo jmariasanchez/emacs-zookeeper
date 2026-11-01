@@ -155,8 +155,10 @@ async fn mutual_tls() {
         .await
         .expect("mTLS connect");
     // The x509 provider authenticates the client certificate subject.
-    let who = zk.whoami().await.unwrap();
-    assert!(who.iter().any(|w| w.scheme == "x509"), "{who:?}");
+    if server.at_least(3, 7) {
+        let who = zk.whoami().await.unwrap();
+        assert!(who.iter().any(|w| w.scheme == "x509"), "{who:?}");
+    }
     zk.close().await;
     // Without a client certificate the handshake is rejected.
     let r = ZkClient::connect(tls_cfg(&server, &pki.p("ca.pem"), None, "localhost")).await;
@@ -200,8 +202,10 @@ async fn sasl_digest_md5() {
     }
     let server = sasl_server(false);
     let zk = ZkClient::connect(sasl_cfg(&server, "alice", "wonderland")).await.expect("SASL connect");
-    let who = zk.whoami().await.unwrap();
-    assert!(who.iter().any(|w| w.scheme == "sasl" && w.user == "alice"), "{who:?}");
+    if server.at_least(3, 7) {
+        let who = zk.whoami().await.unwrap();
+        assert!(who.iter().any(|w| w.scheme == "sasl" && w.user == "alice"), "{who:?}");
+    }
     let p = unique_path("sasl");
     zk.create(&p, b"", &CreateOptions::persistent().with_acl(vec![Acl::new(Perms::ALL, "sasl", "alice")])).await.unwrap();
     let anon = ZkClient::connect(ClusterConfig::new(server.address())).await.unwrap();
