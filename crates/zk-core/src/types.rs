@@ -61,7 +61,7 @@ impl Stat {
 
     /// TTL in milliseconds for TTL nodes.
     pub fn ttl_ms(&self) -> Option<i64> {
-        self.is_ttl().then(|| self.ephemeral_owner & 0x00FF_FFFF_FFFF_FFFF)
+        self.is_ttl().then_some(self.ephemeral_owner & 0x00FF_FFFF_FFFF_FFFF)
     }
 
     /// Whether the server returned a placeholder stat (old servers, see ZOOKEEPER-1297).
