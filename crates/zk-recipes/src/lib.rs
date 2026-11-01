@@ -19,7 +19,7 @@
 //! * [`membership`] provides [`GroupMember`].
 //! * [`discovery`]: Curator x-discovery compatible [`ServiceDiscovery`] and [`ServiceCache`].
 //! * [`lease`]: [`PartitionAssigner`] (exclusive partition ownership).
-//! * [`inspect`]: read-only structure detection for UIs.
+//! * [`inspect`](mod@inspect): read-only structure detection for UIs.
 
 pub mod barrier;
 pub mod common;

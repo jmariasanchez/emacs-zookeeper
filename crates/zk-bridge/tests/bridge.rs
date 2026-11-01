@@ -501,3 +501,91 @@ async fn caches_end_to_end() {
     b.ok("node.delete", json!({"cluster": c, "path": root, "recursive": true})).await;
     b.ok("shutdown", json!({})).await;
 }
+
+#[tokio::test]
+async fn recipes_end_to_end() {
+    let server = require_server!();
+    let mut b = Bridge::start().await;
+    let mut other = Bridge::start().await;
+    let c = b.connect(&server.address()).await;
+    let c2 = other.connect(&server.address()).await;
+    let base = unique_path("bridge-recipes");
+
+    // Counter.
+    let v = b.ok("recipe.counter.add", json!({"cluster": c, "path": format!("{base}/counter"), "delta": 5})).await;
+    assert_eq!(v["value"], 5);
+    let v = other.ok("recipe.counter.add", json!({"cluster": c2, "path": format!("{base}/counter"), "delta": -2})).await;
+    assert_eq!(v["value"], 3);
+    assert_eq!(b.ok("recipe.counter.get", json!({"cluster": c, "path": format!("{base}/counter")})).await["value"], 3);
+
+    // Queue FIFO.
+    let q = format!("{base}/queue");
+    for t in ["one", "two"] {
+        b.ok("recipe.queue.put", json!({"cluster": c, "path": q, "text": t})).await;
+    }
+    assert_eq!(b.ok("recipe.queue.len", json!({"cluster": c, "path": q})).await["len"], 2);
+    let item = other.ok("recipe.queue.take", json!({"cluster": c2, "path": q, "timeout_ms": 1000})).await;
+    assert_eq!(item["data"], b64(b"one"));
+    let ins = b.ok("recipe.inspect", json!({"cluster": c, "path": q})).await;
+    assert_eq!(ins["kind"], "queue");
+    assert_eq!(ins["size"], 1);
+
+    // Lock held by one bridge; inspect from the other shows the owner; release.
+    let lock = format!("{base}/lock");
+    let r = b.ok("recipe.lock.acquire", json!({"cluster": c, "path": lock, "timeout_ms": 5000})).await;
+    let rid = r["recipe"].as_str().unwrap().to_string();
+    assert_eq!(r["ownership"], "held");
+    let ins = other.ok("recipe.inspect", json!({"cluster": c2, "path": lock})).await;
+    assert_eq!(ins["kind"], "lock");
+    assert_eq!(ins["contenders"].as_array().unwrap().len(), 1);
+    // The second bridge cannot get the lock while it is held.
+    let e = other.call("recipe.lock.acquire", json!({"cluster": c2, "path": lock, "timeout_ms": 500})).await.unwrap_err();
+    assert_eq!(e["data"]["kind"], "timeout", "{e}");
+    let list = b.ok("recipe.list", json!({})).await;
+    assert_eq!(list[0]["kind"], "lock");
+    assert_eq!(list[0]["ownership"], "held");
+    b.ok("recipe.release", json!({"recipe": rid})).await;
+    b.notification("recipe.ownership", |p| p["recipe"] == rid && p["state"] == "released").await;
+    let r2 = other.ok("recipe.lock.acquire", json!({"cluster": c2, "path": lock, "timeout_ms": 5000})).await;
+    assert_eq!(r2["ownership"], "held");
+
+    // Latch: first starter leads.
+    let latch = format!("{base}/latch");
+    let l1 = b.ok("recipe.latch.start", json!({"cluster": c, "path": latch, "id": "a"})).await;
+    let l1id = l1["recipe"].as_str().unwrap().to_string();
+    b.notification("recipe.ownership", |p| p["recipe"] == l1id && p["leader"] == true).await;
+    let ins = other.ok("recipe.inspect", json!({"cluster": c2, "path": latch})).await;
+    assert_eq!(ins["kind"], "leader-latch");
+
+    // Member join and discovery-style listing via inspect.
+    let group = format!("{base}/group");
+    let m = b.ok("recipe.member.join", json!({"cluster": c, "path": group, "member_id": "m1", "text": "payload"})).await;
+    assert_eq!(m["ownership"], "held");
+
+    // Disconnecting a cluster loses its recipes.
+    b.ok("cluster.disconnect", json!({"cluster": c})).await;
+    assert_eq!(b.ok("recipe.list", json!({})).await.as_array().unwrap().len(), 0);
+    other.ok("shutdown", json!({})).await;
+    let mut cleanup = Bridge::start().await;
+    let c3 = cleanup.connect(&server.address()).await;
+    cleanup.ok("node.delete", json!({"cluster": c3, "path": base, "recursive": true})).await;
+    cleanup.ok("shutdown", json!({})).await;
+    b.ok("shutdown", json!({})).await;
+}
+
+#[tokio::test]
+async fn recipes_respect_read_only() {
+    let server = require_server!();
+    let mut b = Bridge::start().await;
+    let ro = b.connect_cfg(json!({"connect": server.address(), "safety": {"read_only": true}})).await;
+    let p = unique_path("bridge-ro-recipe");
+    assert_eq!(b.err_kind("recipe.lock.acquire", json!({"cluster": ro, "path": p})).await, "policy-denied");
+    assert_eq!(b.err_kind("recipe.latch.start", json!({"cluster": ro, "path": p})).await, "policy-denied");
+    assert_eq!(b.err_kind("recipe.member.join", json!({"cluster": ro, "path": p, "member_id": "x"})).await, "policy-denied");
+    assert_eq!(b.err_kind("recipe.queue.put", json!({"cluster": ro, "path": p, "text": "x"})).await, "policy-denied");
+    assert_eq!(b.err_kind("recipe.counter.add", json!({"cluster": ro, "path": p, "delta": 1})).await, "policy-denied");
+    // Inspection is allowed.
+    let ins = b.ok("recipe.inspect", json!({"cluster": ro, "path": "/zookeeper"})).await;
+    assert!(ins["kind"].is_string());
+    b.ok("shutdown", json!({})).await;
+}

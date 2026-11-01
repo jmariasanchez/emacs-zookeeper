@@ -47,6 +47,7 @@ pub struct Bridge {
     pub started: Instant,
     pub limits: Limits,
     pub ext: crate::ext::ExtState,
+    pub recipes: crate::recipes::RecipeState,
 }
 
 /// Audit ring buffer, notification emitter and optional JSONL file.
@@ -108,6 +109,7 @@ impl Bridge {
             started: Instant::now(),
             limits,
             ext: Default::default(),
+            recipes: Default::default(),
         })
     }
 
@@ -131,6 +133,7 @@ impl Bridge {
             w.cancel.cancel();
         }
         self.ext.shutdown();
+        self.recipes.shutdown().await;
         for c in clusters {
             c.forwarder.cancel();
             c.client.close().await;
@@ -150,6 +153,7 @@ impl Bridge {
             "audit.list",
         ];
         v.extend(crate::ext::METHODS);
+        v.extend(crate::recipes::METHODS);
         v
     }
 
@@ -397,6 +401,7 @@ impl Bridge {
                 Ok(serde_json::to_value(self.audit.list(a.limit.unwrap_or(200))).unwrap())
             },
             m if crate::ext::METHODS.contains(&m) => crate::ext::dispatch(self, m, p).await,
+            m if crate::recipes::METHODS.contains(&m) => crate::recipes::dispatch(self, m, p).await,
             _ => Err(RpcError::new(crate::rpc::METHOD_NOT_FOUND, format!("method not found: {method}"))),
         }
     }
@@ -465,6 +470,7 @@ impl Bridge {
             w.cancel.cancel();
         }
         self.ext.drop_cluster(&a.cluster);
+        self.recipes.drop_cluster(&a.cluster).await;
         c.client.close().await;
         // Emit the final state, the forwarder may already be gone.
         self.outbox.notify(

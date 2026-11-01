@@ -2,6 +2,7 @@
 
 mod dispatch;
 mod ext;
+mod recipes;
 mod rpc;
 
 use std::collections::HashMap;
