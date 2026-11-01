@@ -49,7 +49,7 @@ fn fnv1a(s: &str) -> u64 {
 }
 
 /// Rendezvous assignment: the owner of each partition among `members`.
-pub fn rendezvous_owner<'a>(partition: u32, members: &'a [String]) -> Option<&'a str> {
+pub fn rendezvous_owner(partition: u32, members: &[String]) -> Option<&str> {
     members.iter().max_by_key(|m| (fnv1a(&format!("{m}/{partition}")), m.as_str())).map(|s| s.as_str())
 }
 

@@ -76,7 +76,7 @@ async fn children(client: &ZkClient, path: &str) -> Result<Vec<String>> {
 fn queue_head(children: &[String], claimed: &[String]) -> (Vec<QueueEntry>, usize) {
     let now = now_ms();
     let items = sorted_items(children);
-    let ready = items.iter().filter(|i| i.ready_at_ms.is_none_or(|r| r <= now)).count();
+    let ready = items.iter().filter(|i| !i.ready_at_ms.is_some_and(|r| r > now)).count();
     let head = items
         .into_iter()
         .take(HEAD)

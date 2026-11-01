@@ -16,7 +16,7 @@
 //! * [`queue`]: [`DistributedQueue`], [`PriorityQueue`], [`LockingQueue`], delayed items.
 //! * [`id`]: unique id generation.
 //! * [`persistent_node`]: [`PersistentNode`] (survives session expiry).
-//! * [`membership`]: [`GroupMember`].
+//! * [`membership`] provides [`GroupMember`].
 //! * [`discovery`]: Curator x-discovery compatible [`ServiceDiscovery`] and [`ServiceCache`].
 //! * [`lease`]: [`PartitionAssigner`] (exclusive partition ownership).
 //! * [`inspect`]: read-only structure detection for UIs.
