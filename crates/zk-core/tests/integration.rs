@@ -578,3 +578,51 @@ async fn binary_and_large_data() {
     assert_eq!(rep.paths.len(), 1001);
     zk.close().await;
 }
+
+#[tokio::test]
+async fn search_and_diff() {
+    let server = require_server!();
+    let zk = connect(&server.address()).await;
+    let a = unique_path("diff-a");
+    let b = unique_path("diff-b");
+    for (root, extra) in [(&a, "left"), (&b, "right")] {
+        zk.create(root, b"", &CreateOptions::persistent()).await.unwrap();
+        zk.create(&format!("{root}/same"), b"{\"x\":1}", &CreateOptions::persistent()).await.unwrap();
+        zk.create(&format!("{root}/changed"), extra.as_bytes(), &CreateOptions::persistent()).await.unwrap();
+        zk.create(&format!("{root}/only-{extra}"), b"", &CreateOptions::persistent()).await.unwrap();
+    }
+    zk.create(&format!("{a}/eph"), b"needle", &CreateOptions::ephemeral()).await.unwrap();
+
+    let r = zk.search(&a, &SearchQuery { name: Some("^only".into()), max_nodes: 100, max_results: 10, ..Default::default() }).await.unwrap();
+    assert_eq!(r.matches.len(), 1);
+    assert_eq!(r.matches[0].path, format!("{a}/only-left"));
+    assert!(!r.truncated);
+    let r = zk.search(&a, &SearchQuery { data_contains: Some("needle".into()), max_nodes: 100, max_results: 10, ..Default::default() }).await.unwrap();
+    assert_eq!(r.matches.iter().map(|m| m.path.clone()).collect::<Vec<_>>(), vec![format!("{a}/eph")]);
+    let r = zk.search(&a, &SearchQuery { kind: Some("ephemeral".into()), max_nodes: 100, max_results: 10, ..Default::default() }).await.unwrap();
+    assert_eq!(r.matches.len(), 1);
+    let r = zk.search(&a, &SearchQuery { data: Some(r#""x":\s*1"#.into()), max_nodes: 100, max_results: 10, ..Default::default() }).await.unwrap();
+    assert_eq!(r.matches.len(), 1);
+    let r = zk.search(&a, &SearchQuery { acl: Some("world:anyone".into()), max_nodes: 100, max_results: 2, ..Default::default() }).await.unwrap();
+    assert_eq!(r.matches.len(), 2);
+    assert!(r.partial_reasons.contains(&"result-limit".to_string()));
+    let r = zk.search(&a, &SearchQuery { max_nodes: 2, max_results: 100, ..Default::default() }).await.unwrap();
+    assert!(r.partial_reasons.contains(&"node-limit".to_string()));
+    assert!(zk.search(&a, &SearchQuery { name: Some("(".into()), ..Default::default() }).await.is_err());
+
+    let d = diff_trees(&zk, &a, &zk, &b, &DiffOptions::default()).await.unwrap();
+    let kinds: Vec<(String, String)> = d.differences.iter().map(|x| (x.rel.clone(), x.kind.clone())).collect();
+    assert_eq!(
+        kinds,
+        vec![
+            ("changed".into(), "data".into()),
+            ("eph".into(), "only-left".into()),
+            ("only-left".into(), "only-left".into()),
+            ("only-right".into(), "only-right".into()),
+        ]
+    );
+    assert_eq!(d.differences[0].left.as_ref().unwrap().data.as_deref(), Some(&b"left"[..]));
+    zk.delete_recursive(&a, &Default::default()).await.unwrap();
+    zk.delete_recursive(&b, &Default::default()).await.unwrap();
+    zk.close().await;
+}

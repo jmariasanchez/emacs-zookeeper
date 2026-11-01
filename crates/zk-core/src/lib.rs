@@ -20,6 +20,7 @@ pub mod config;
 pub mod error;
 pub mod ops;
 pub mod path;
+pub mod search;
 pub mod session;
 pub mod types;
 pub mod watch;
@@ -30,6 +31,7 @@ pub use ops::{
     CreateOptions, DeleteRecursiveOptions, DeleteRecursiveReport, ReadOp, ReadResult, TreeNode, TxnOp, TxnResult,
     WalkEntry, WalkOptions, WalkResult,
 };
+pub use search::{diff_trees, DiffOptions, DiffResult, Difference, NodeSummary, SearchMatch, SearchQuery, SearchResult};
 pub use session::{
     AuditRecord, AuditSink, ClientDiagnostics, ConnectionEvent, ConnectionEventKind, ConnectionState, Session, ZkClient,
 };

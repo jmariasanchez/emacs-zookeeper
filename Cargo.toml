@@ -31,6 +31,7 @@ sha1 = "0.10"
 uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
 rand = "0.8"
+regex = "1"
 
 zk-core = { path = "crates/zk-core" }
 zk-cache = { path = "crates/zk-cache" }

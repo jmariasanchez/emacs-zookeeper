@@ -471,10 +471,6 @@ impl ZkClient {
         self.inner.stats.failures.fetch_add(1, Ordering::Relaxed);
         *self.inner.last_error.lock().unwrap() = Some(err.clone());
     }
-
-    pub(crate) fn connector(&self) -> Result<zk::Connector> {
-        build_connector(&self.inner.config)
-    }
 }
 
 fn read_file(path: &std::path::Path, what: &str) -> Result<String> {
