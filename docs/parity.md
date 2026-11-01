@@ -163,7 +163,7 @@ gives the conservative behaviour.
 | F18 | Customizable faces and hooks | `defface`s, mode hooks, notification hook variables | byte-compile | done | v0.1 |
 | F19 | Read-only and destructive-operation controls | Profile read-only, dry-run preview, typed confirmation for recursive or protected deletes, second confirmation before `force` | ert | done | v0.1 |
 | F20 | Multi-cluster browsing and comparison | One browser per cluster, cross-cluster diff and copy | bridge-e2e | done | v0.1 |
-| F21 | Cache-driven live refresh and freshness display | browser and inspector follow mode (`cache.*`) | ert-it | in progress | v0.1 |
+| F21 | Cache-driven live refresh and freshness display | One `children` cache per expanded browser node, freshness shown in the header with a STALE warning, falling back to watches when the bridge has no caches. `zookeeper-node-follow-mode` never overwrites local edits | ert `zookeeper-test-cache-fallback-to-watch`, `zookeeper-test-browser-freshness`, `zookeeper-test-follow-never-clobbers`; ert-it `zookeeper-integration-caches` | done | v0.1 |
 | F22 | Recipe inspection UI | `zookeeper-recipe.el` | ert | partial (waits on `recipe.*` bridge methods) | v0.1 |
 
 ## G. Quality and distribution
