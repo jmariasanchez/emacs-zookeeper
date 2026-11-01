@@ -66,13 +66,14 @@ server refuses DIGEST-MD5. Servers that use DIGEST-MD5 SASL need
 | Platform | Rust crates | Emacs package | Release binary |
 | --- | --- | --- | --- |
 | macOS aarch64 | Tested locally | Tested (Emacs 31.1) | Release workflow |
-| Linux x86_64 | CI | CI (Emacs 29.4, 30.1) | Release workflow |
+| Linux x86_64 | CI | CI (Emacs 29.4, 30.2, 31.1) | Release workflow |
 | Linux aarch64 | Builds (cross) | Should work | Release workflow |
 | macOS x86_64 | Builds | Should work | Release workflow |
 | Windows | Untested, not advertised | Untested | not built |
 
 The minimum Emacs version is 29.1, because the package needs native JSON and
-`transient`. CI runs the ERT suite on 29.4 and 30.1.
+`transient`. CI runs the ERT suite, including the real-bridge integration
+flow, on 29.4, 30.2 and 31.1.
 
 The minimum supported Rust version is 1.85. It is the floor imposed by
 edition-2024 dependencies (`getrandom` 0.4 and others), and the lockfile is
