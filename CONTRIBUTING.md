@@ -26,7 +26,8 @@
 
 ## Setup
 
-* A Rust stable toolchain (MSRV 1.80).
+* A Rust stable toolchain (MSRV 1.85, checked in CI). Dependency updates
+  should respect it: `CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo update`.
 * Java 11 or newer, plus a ZooKeeper binary distribution. Point
   `ZOOKEEPER_HOME` at it, or unpack it under `~/.cache/zk/`:
 

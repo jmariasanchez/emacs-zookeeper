@@ -23,6 +23,15 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+  msrv:
+    name: msrv (Rust 1.85)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --locked --no-run
+
   rust:
     name: rust (ZooKeeper ${{ matrix.zk }})
     runs-on: ubuntu-latest
@@ -45,7 +54,7 @@ jobs:
           mkdir -p "$HOME/.cache/zk"
           curl -fsSL "https://archive.apache.org/dist/zookeeper/zookeeper-$v/apache-zookeeper-$v-bin.tar.gz" | tar xz -C "$HOME/.cache/zk"
           echo "ZOOKEEPER_HOME=$HOME/.cache/zk/apache-zookeeper-$v-bin" >> "$GITHUB_ENV"
-      - run: cargo test --workspace -- --test-threads 4
+      - run: cargo test --workspace --locked -- --test-threads 4
 
   emacs:
     name: emacs ${{ matrix.emacs }}
