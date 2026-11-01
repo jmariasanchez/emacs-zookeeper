@@ -11,6 +11,10 @@ repository.workspace = true
 name = "zk-bridge"
 path = "src/main.rs"
 
+[features]
+default = []
+gssapi = ["zk-core/gssapi"]
+
 [dependencies]
 zk-core.workspace = true
 zk-cache.workspace = true
