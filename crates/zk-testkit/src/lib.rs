@@ -60,6 +60,9 @@ pub struct ServerOptions {
     pub files: Vec<(String, String)>,
     /// Minimum session timeout in ms (`minSessionTimeout`), lets tests use short sessions.
     pub min_session_timeout_ms: Option<u64>,
+    /// Also listen for TLS clients on this port (`secureClientPort`). Requires
+    /// `ssl.*` settings in `extra_config` and the Netty connection factory.
+    pub secure_client_port: Option<u16>,
 }
 
 /// A running standalone ZooKeeper server.
@@ -111,6 +114,9 @@ impl ZkServer {
         );
         if let Some(ms) = self.options.min_session_timeout_ms {
             cfg.push_str(&format!("minSessionTimeout={ms}\n"));
+        }
+        if let Some(p) = self.options.secure_client_port {
+            cfg.push_str(&format!("secureClientPort={p}\nsecureClientPortAddress=127.0.0.1\n"));
         }
         for l in &self.options.extra_config {
             cfg.push_str(l);
@@ -176,6 +182,10 @@ impl ZkServer {
 
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    pub fn secure_port(&self) -> Option<u16> {
+        self.options.secure_client_port
     }
 
     /// `127.0.0.1:port`
