@@ -85,6 +85,8 @@ async fn next_matching<F: Fn(&CacheEvent) -> bool>(
 #[tokio::test]
 async fn initial_load_and_incremental() {
     let server = require_server!();
+    // Caches are built on persistent watches (ZooKeeper 3.6+).
+    zk_testkit::require_version!(server, 3, 6);
     let zk = connect(&server.address()).await;
     let root = unique_path("tree");
     mk(&zk, &format!("{root}/a/x"), b"ax").await;
@@ -135,6 +137,8 @@ async fn initial_load_and_incremental() {
 #[tokio::test]
 async fn budgets() {
     let server = require_server!();
+    // Caches are built on persistent watches (ZooKeeper 3.6+).
+    zk_testkit::require_version!(server, 3, 6);
     let zk = connect(&server.address()).await;
     let root = unique_path("budget");
     mk(&zk, &root, b"").await;
@@ -174,6 +178,8 @@ async fn budgets() {
 #[tokio::test]
 async fn node_cache_nonexistent_then_created() {
     let server = require_server!();
+    // Caches are built on persistent watches (ZooKeeper 3.6+).
+    zk_testkit::require_version!(server, 3, 6);
     let zk = connect(&server.address()).await;
     let root = unique_path("nodecache");
     let cache = NodeCache::start(zk.clone(), &root, CacheOptions::default()).await.unwrap();
@@ -196,6 +202,8 @@ async fn node_cache_nonexistent_then_created() {
 #[tokio::test]
 async fn children_cache() {
     let server = require_server!();
+    // Caches are built on persistent watches (ZooKeeper 3.6+).
+    zk_testkit::require_version!(server, 3, 6);
     let zk = connect(&server.address()).await;
     let root = unique_path("children");
     mk(&zk, &format!("{root}/a/deep"), b"").await;
@@ -214,6 +222,8 @@ async fn children_cache() {
 #[tokio::test]
 async fn resync_after_disconnect() {
     let server = require_server!();
+    // Caches are built on persistent watches (ZooKeeper 3.6+).
+    zk_testkit::require_version!(server, 3, 6);
     let proxy = FaultProxy::start(server.address()).await;
     let mut c = cfg(&proxy.address());
     c.session_timeout_ms = 8_000;
@@ -251,6 +261,8 @@ async fn resync_after_disconnect() {
 #[tokio::test]
 async fn rebuild_after_session_expiry() {
     let server = require_server!();
+    // Caches are built on persistent watches (ZooKeeper 3.6+).
+    zk_testkit::require_version!(server, 3, 6);
     let proxy = FaultProxy::start(server.address()).await;
     let mut c = cfg(&proxy.address());
     c.session_timeout_ms = 2_000;
@@ -299,6 +311,8 @@ async fn rebuild_after_session_expiry() {
 #[tokio::test]
 async fn concurrent_writers_converge() {
     let server = require_server!();
+    // Caches are built on persistent watches (ZooKeeper 3.6+).
+    zk_testkit::require_version!(server, 3, 6);
     let zk = connect(&server.address()).await;
     let root = unique_path("random");
     mk(&zk, &root, b"").await;
@@ -351,6 +365,8 @@ impl SeedCompat for rand::rngs::StdRng {
 #[ignore]
 async fn bench_10k_tree() {
     let server = require_server!();
+    // Caches are built on persistent watches (ZooKeeper 3.6+).
+    zk_testkit::require_version!(server, 3, 6);
     let zk = connect(&server.address()).await;
     let root = unique_path("bench");
     mk(&zk, &root, b"").await;
@@ -373,4 +389,17 @@ async fn bench_10k_tree() {
     eprintln!("initial load of {} nodes: {:?} ({:?})", cache.status().nodes, t.elapsed(), cache.status());
     drop(cache);
     zk.delete_recursive(&root, &DeleteRecursiveOptions { limit: Some(20_000), ..Default::default() }).await.unwrap();
+}
+
+#[tokio::test]
+async fn old_servers_report_unimplemented() {
+    let server = require_server!();
+    if server.at_least(3, 6) {
+        return;
+    }
+    let zk = connect(&server.address()).await;
+    let e = TreeCache::start(zk.clone(), "/", CacheOptions::default()).await.err().expect("must fail on < 3.6");
+    assert_eq!(e.kind, ErrorKind::Unimplemented);
+    assert!(e.message.contains("3.6"), "{e}");
+    zk.close().await;
 }

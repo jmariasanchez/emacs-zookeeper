@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  ZK_TESTS_REQUIRED: "1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  rust:
+    name: rust (ZooKeeper ${{ matrix.zk }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        zk: ["3.6.4", "3.7.2", "3.8.8", "3.9.7"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Fetch ZooKeeper
+        run: |
+          set -eu
+          v=${{ matrix.zk }}
+          mkdir -p "$HOME/.cache/zk"
+          curl -fsSL "https://archive.apache.org/dist/zookeeper/zookeeper-$v/apache-zookeeper-$v-bin.tar.gz" | tar xz -C "$HOME/.cache/zk"
+          echo "ZOOKEEPER_HOME=$HOME/.cache/zk/apache-zookeeper-$v-bin" >> "$GITHUB_ENV"
+      - run: cargo test --workspace -- --test-threads 4
+
+  emacs:
+    name: emacs ${{ matrix.emacs }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        emacs: ["29.4", "30.1"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: purcell/setup-emacs@master
+        with:
+          version: ${{ matrix.emacs }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Byte-compile (warnings are errors)
+        run: make lisp-compile
+      - name: Fetch ZooKeeper
+        run: |
+          mkdir -p "$HOME/.cache/zk"
+          curl -fsSL https://archive.apache.org/dist/zookeeper/zookeeper-3.9.7/apache-zookeeper-3.9.7-bin.tar.gz | tar xz -C "$HOME/.cache/zk"
+      - name: ERT (unit + integration against real bridge and ZooKeeper)
+        run: make lisp-test-integration
