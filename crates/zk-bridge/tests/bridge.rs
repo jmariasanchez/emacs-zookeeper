@@ -465,3 +465,39 @@ async fn admin_and_cross_cluster_copy() {
     }
     b.ok("shutdown", json!({})).await;
 }
+
+#[tokio::test]
+async fn caches_end_to_end() {
+    let server = require_server!();
+    zk_testkit::require_version!(server, 3, 6);
+    let mut b = Bridge::start().await;
+    let c = b.connect(&server.address()).await;
+    let root = unique_path("bridge-cache");
+    b.ok("node.create", json!({"cluster": c, "path": root, "text": "r"})).await;
+    b.ok("node.create", json!({"cluster": c, "path": format!("{root}/a"), "text": "A"})).await;
+    let r = b.ok("cache.start", json!({"cluster": c, "path": root, "kind": "tree"})).await;
+    let k = r["cache"].as_str().unwrap().to_string();
+    assert_eq!(r["status"]["state"], "live");
+    assert_eq!(r["status"]["nodes"], 2);
+    let got = b.ok("cache.get", json!({"cache": k, "path": format!("{root}/a")})).await;
+    assert_eq!(got["text"], "A");
+    b.ok("node.create", json!({"cluster": c, "path": format!("{root}/b")})).await;
+    let ev = b.notification("cache.event", |p| p["cache"] == k && p["event"]["type"] == "node-added").await;
+    assert_eq!(ev["event"]["path"], format!("{root}/b"));
+    let ch = b.ok("cache.children", json!({"cache": k, "path": root})).await;
+    assert_eq!(ch, json!(["a", "b"]));
+    let snap = b.ok("cache.snapshot", json!({"cache": k})).await;
+    assert_eq!(snap["nodes"].as_array().unwrap().len(), 3);
+    let list = b.ok("cache.list", json!({})).await;
+    assert_eq!(list[0]["kind"], "tree");
+    b.ok("cache.stop", json!({"cache": k})).await;
+    assert_eq!(b.call("cache.status", json!({"cache": k})).await.unwrap_err()["code"], -32002);
+    let n = b.ok("cache.start", json!({"cluster": c, "path": format!("{root}/missing"), "kind": "node"})).await;
+    let nk = n["cache"].as_str().unwrap().to_string();
+    assert_eq!(b.ok("cache.get", json!({"cache": nk})).await, Value::Null);
+    b.ok("cluster.disconnect", json!({"cluster": c})).await;
+    assert_eq!(b.call("cache.status", json!({"cache": nk})).await.unwrap_err()["code"], -32002);
+    let c = b.connect(&server.address()).await;
+    b.ok("node.delete", json!({"cluster": c, "path": root, "recursive": true})).await;
+    b.ok("shutdown", json!({})).await;
+}

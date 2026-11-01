@@ -1758,6 +1758,7 @@ name = "zk-cache"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "rand",
  "serde",
  "serde_json",
  "tokio",
@@ -1775,9 +1776,11 @@ dependencies = [
  "base64",
  "futures",
  "rand",
+ "regex",
  "serde",
  "serde_json",
  "sha1",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-util",
