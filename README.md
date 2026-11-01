@@ -16,7 +16,9 @@ measured status.
 
 ## Status
 
-Pre-release (`0.1.0-dev`). Everything listed as `done` in the parity spec is
+[![CI](https://github.com/jmariasanchez/emacs-zookeeper/actions/workflows/ci.yml/badge.svg)](https://github.com/jmariasanchez/emacs-zookeeper/actions/workflows/ci.yml)
+
+Preview release (`0.1.0`). Everything listed as `done` in the parity spec is
 tested against real ZooKeeper servers. The tests never use mocks: `zk-testkit`
 launches a JVM ZooKeeper, and a fault-injecting proxy covers partitions,
 disconnects and session expiry.
@@ -26,6 +28,9 @@ disconnects and session expiry.
 * The test suites cover plain TCP, TLS (CA and hostname verification), mutual
   TLS, digest auth and SASL DIGEST-MD5.
 * Emacs 29.1 or newer.
+* Rust 1.85 or newer to build from source. Prebuilt `zk-bridge` binaries for
+  Linux and macOS (x86_64 and aarch64) are attached to each
+  [GitHub release](https://github.com/jmariasanchez/emacs-zookeeper/releases).
 
 ## Quick start
 
