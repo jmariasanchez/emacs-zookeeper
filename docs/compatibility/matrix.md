@@ -65,10 +65,10 @@ server refuses DIGEST-MD5. Servers that use DIGEST-MD5 SASL need
 
 | Platform | Rust crates | Emacs package | Release binary |
 | --- | --- | --- | --- |
-| macOS aarch64 | Tested locally | Tested (Emacs 31.1) | Release workflow |
-| Linux x86_64 | CI | CI (Emacs 29.4, 30.2, 31.1) | Release workflow |
-| Linux aarch64 | Builds (cross) | Should work | Release workflow |
-| macOS x86_64 | Builds | Should work | Release workflow |
+| macOS aarch64 | Tested locally | Tested (Emacs 31.1) | v0.1.0, verified against ERT |
+| Linux x86_64 | CI | CI (Emacs 29.4, 30.2, 31.1) | v0.1.0 |
+| Linux aarch64 | Native release build, `--version` smoke test | Should work | v0.1.0 |
+| macOS x86_64 | Native release build, `--version` smoke test | Should work | v0.1.0 |
 | Windows | Untested, not advertised | Untested | not built |
 
 The minimum Emacs version is 29.1, because the package needs native JSON and

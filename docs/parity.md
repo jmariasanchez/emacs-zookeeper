@@ -183,8 +183,8 @@ are tracked for v1.0.
 | G5 | Fault injection and partitions | `zk-testkit::FaultProxy` (refuse, blackhole, drop, `partition_until_expired`). Multi-node ensemble harness is planned | partial | v1.0 |
 | G6 | Compatibility tests | `scripts/compat-matrix.sh`; see `docs/compatibility/matrix.md` | done for 3.5 to 3.9 standalone | v0.1 |
 | G7 | Benchmarks and performance regression | `crates/zk-bridge/benches` (IPC overhead), cache 10k bench (`#[ignore]`) | partial | v1.0 |
-| G8 | Cross-platform binaries | `.github/workflows/release.yml` (Linux x86_64/aarch64, macOS x86_64/aarch64) | done in config, not yet exercised by a tag | v0.1 |
+| G8 | Cross-platform binaries | `.github/workflows/release.yml` (Linux x86_64/aarch64, macOS x86_64/aarch64, native builds with a `--version` smoke test) | done: exercised by `v0.1.0`, artifacts and checksums verified (see `verification.md`) | v0.1 |
 | G9 | Emacs package and binary discovery | `zookeeper-bridge-executable` discovery (defcustom, `exec-path`, package `bin/`, repo `target/`) | done | v0.1 |
-| G10 | Automated releases and documentation | release workflow, `docs/` | partial | v1.0 |
+| G10 | Automated releases and documentation | release workflow (tag to GitHub release with binaries, checksums and a package.el tarball), `docs/` | partial: releases are automated and exercised; hosted docs and MELPA submission are open | v1.0 |
 | G11 | Threat model and redaction tests | `docs/architecture/threat-model.md`; redaction tests in unit, bridge-e2e and ert | done | v0.1 |
 | G12 | Contribution guide and compatibility matrix | `CONTRIBUTING.md`, `docs/compatibility/matrix.md` | done | v0.1 |
